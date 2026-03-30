@@ -1,0 +1,20 @@
+{
+  "name": "discord-rich-presence-watcher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone local Discord Rich Presence watcher for coding activity.",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.10",
+    "typescript": "^5.7.3"
+  }
+}
