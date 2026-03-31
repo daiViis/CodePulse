@@ -1,4 +1,17 @@
 node_modules/
 dist/
+release/
 *.log
 watcher.config.json
+.env
+
+# MacOS
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+
+# Temp/Output
+output/
+tmp/

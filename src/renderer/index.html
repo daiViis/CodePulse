@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CodePulse</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="window-shell">
+      <div class="titlebar">
+        <div class="titlebar-label">CodePulse</div>
+        <div class="titlebar-actions">
+          <button id="minimizeButton" class="titlebar-button" type="button" aria-label="Minimize window">-</button>
+          <button id="maximizeButton" class="titlebar-button" type="button" aria-label="Maximize window">+</button>
+          <button id="closeButton" class="titlebar-button titlebar-button-close" type="button" aria-label="Close window">
+            x
+          </button>
+        </div>
+      </div>
+
+      <section class="utility-panel">
+        <header class="top-row">
+          <div id="statusLine" class="status-line">
+            <span id="statusDot" class="status-dot status-working"></span>
+            <span id="statusValue" class="status-text">Working</span>
+          </div>
+          <button id="settingsButton" class="icon-button" type="button" aria-label="Open settings">⚙</button>
+        </header>
+
+        <section class="content">
+          <div id="projectValue" class="project-name">Detecting project...</div>
+          <div id="phaseValue" class="phase-name">Waiting for activity</div>
+        </section>
+
+        <footer class="bottom-row">
+          <div id="sessionValue" class="meta-text">00:00:00</div>
+          <div class="meta-cluster">
+            <div id="aiLine" class="connection-line">
+              <span id="aiDot" class="status-dot status-idle"></span>
+              <span id="aiValue" class="meta-text">AI Off</span>
+            </div>
+            <div id="connectionLine" class="connection-line">
+              <span id="discordDot" class="status-dot status-connected"></span>
+              <span id="connectionValue" class="meta-text">Discord</span>
+            </div>
+          </div>
+        </footer>
+      </section>
+    </main>
+
+    <div id="settingsOverlay" class="settings-overlay hidden">
+      <section class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <header class="settings-header">
+          <div>
+            <p class="settings-kicker">Preferences</p>
+            <h2 id="settingsTitle">Settings</h2>
+          </div>
+          <button id="closeSettingsButton" class="icon-button modal-close-button" type="button" aria-label="Close settings">
+            ×
+          </button>
+        </header>
+
+        <form id="settingsForm" class="settings-form">
+          <section class="settings-section">
+            <h3>Identity</h3>
+            <label class="field">
+              <span class="field-label">Username</span>
+              <input id="usernameInput" name="username" class="text-input" type="text" maxlength="80" />
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <h3>Workspace</h3>
+            <label class="field">
+              <span class="field-label">Watched folder</span>
+              <div class="input-row">
+                <input id="watchedFolderInput" name="watchedFolderPath" class="text-input" type="text" />
+                <button id="browseFolderButton" class="secondary-button" type="button">Browse</button>
+              </div>
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <h3>Discord Presence Format</h3>
+            <label class="field">
+              <span class="field-label">Details template</span>
+              <input id="detailsTemplateInput" name="detailsTemplate" class="text-input" type="text" />
+            </label>
+            <label class="field">
+              <span class="field-label">State template</span>
+              <input id="stateTemplateInput" name="stateTemplate" class="text-input" type="text" />
+            </label>
+            <p class="helper-text">Supported variables: {username}, {project}, {phase}</p>
+          </section>
+
+          <section class="settings-section">
+            <h3>AI Activity Label</h3>
+            <label class="toggle-field">
+              <input id="aiLabelingEnabledInput" name="aiLabelingEnabled" type="checkbox" />
+              <span>Use OpenAI to refine the activity label</span>
+            </label>
+            <label class="field">
+              <span class="field-label">OpenAI model</span>
+              <input id="openAiModelInput" name="openAiModel" class="text-input" type="text" />
+            </label>
+            <p class="helper-text">API key is read from `.env` as `OPENAI_API_KEY`.</p>
+          </section>
+
+          <section class="settings-section">
+            <h3>Watcher</h3>
+            <div class="compact-grid">
+              <label class="field">
+                <span class="field-label">Poll interval (sec)</span>
+                <input
+                  id="pollIntervalInput"
+                  name="pollIntervalSeconds"
+                  class="text-input"
+                  type="number"
+                  min="5"
+                  max="300"
+                  step="1"
+                />
+              </label>
+              <label class="field">
+                <span class="field-label">Inactivity timeout (min)</span>
+                <input
+                  id="inactivityTimeoutInput"
+                  name="inactivityTimeoutMinutes"
+                  class="text-input"
+                  type="number"
+                  min="1"
+                  max="1440"
+                  step="1"
+                />
+              </label>
+            </div>
+
+            <label class="toggle-field">
+              <input id="showElapsedTimeInput" name="showElapsedTime" type="checkbox" />
+              <span>Show elapsed time</span>
+            </label>
+            <label class="toggle-field">
+              <input id="minimizeToTrayInput" name="minimizeToTray" type="checkbox" />
+              <span>Minimize to tray</span>
+            </label>
+            <label class="toggle-field">
+              <input id="launchOnStartupInput" name="launchOnStartup" type="checkbox" />
+              <span>Launch on system startup</span>
+            </label>
+          </section>
+
+          <p id="settingsStatus" class="settings-status" role="status"></p>
+
+          <footer class="settings-footer">
+            <button id="cancelSettingsButton" class="secondary-button" type="button">Cancel</button>
+            <button id="saveSettingsButton" class="primary-button" type="submit">Save</button>
+          </footer>
+        </form>
+      </section>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

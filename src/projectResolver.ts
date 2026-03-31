@@ -87,21 +87,21 @@ export function resolveProjectContext(
   }
 
   const startDirectory = resolveStartDirectory(absolutePath);
-  const projectRoot = findNearestProjectRoot(startDirectory, workspaceRoot);
   const repoRoot = findGitRoot(startDirectory, workspaceRoot);
-
-  if (projectRoot) {
-    return {
-      workspaceRoot,
-      projectRoot,
-      repoRoot
-    };
-  }
+  const projectRoot = findOutermostProjectRoot(startDirectory, workspaceRoot);
 
   if (repoRoot) {
     return {
       workspaceRoot,
       projectRoot: repoRoot,
+      repoRoot
+    };
+  }
+
+  if (projectRoot) {
+    return {
+      workspaceRoot,
+      projectRoot,
       repoRoot
     };
   }
@@ -124,6 +124,47 @@ export function resolveProjectContext(
   };
 }
 
+export function resolveProjectContextFromDirectory(
+  directoryPath: string,
+  appRoot: string
+): ResolvedProjectContext | null {
+  const resolvedPath = path.resolve(directoryPath);
+  if (isIgnoredPath(resolvedPath, appRoot)) {
+    return null;
+  }
+
+  const startDirectory = resolveStartDirectory(resolvedPath);
+  if (!fs.existsSync(startDirectory)) {
+    return null;
+  }
+
+  const fileSystemRoot = path.parse(startDirectory).root || startDirectory;
+  const repoRoot = findGitRoot(startDirectory, fileSystemRoot);
+  const projectRoot = findOutermostProjectRoot(startDirectory, fileSystemRoot);
+
+  if (repoRoot) {
+    return {
+      workspaceRoot: startDirectory,
+      projectRoot: repoRoot,
+      repoRoot
+    };
+  }
+
+  if (projectRoot) {
+    return {
+      workspaceRoot: startDirectory,
+      projectRoot,
+      repoRoot: null
+    };
+  }
+
+  return {
+    workspaceRoot: startDirectory,
+    projectRoot: startDirectory,
+    repoRoot: null
+  };
+}
+
 export function deriveProjectName(projectRoot: string): string {
   return normalizeProjectName(path.basename(projectRoot));
 }
@@ -137,22 +178,23 @@ function resolveStartDirectory(absolutePath: string): string {
   return stats.isDirectory() ? absolutePath : path.dirname(absolutePath);
 }
 
-function findNearestProjectRoot(startDirectory: string, stopDirectory: string): string | null {
+function findOutermostProjectRoot(startDirectory: string, stopDirectory: string): string | null {
   let current = path.resolve(startDirectory);
   const stop = path.resolve(stopDirectory);
+  let match: string | null = null;
 
   while (true) {
     if (hasProjectMarkers(current)) {
-      return current;
+      match = current;
     }
 
     if (samePath(current, stop)) {
-      return null;
+      return match;
     }
 
     const parent = path.dirname(current);
     if (samePath(parent, current)) {
-      return null;
+      return match;
     }
 
     current = parent;

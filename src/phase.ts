@@ -1,6 +1,13 @@
 import path from "node:path";
 import { normalizeProjectName } from "./utils";
 
+export type DerivedPhaseSource = "git" | "file-heuristic" | "generic";
+
+export interface DerivedPhaseResult {
+  phase: string;
+  source: DerivedPhaseSource;
+}
+
 const BRANCH_RULES: Array<{ keywords: string[]; phase: string }> = [
   { keywords: ["bugfix", "fix"], phase: "Bug Fixing" },
   { keywords: ["feature", "feat"], phase: "Feature Development" },
@@ -77,10 +84,21 @@ const PATH_RULES: Array<{ keywords: string[]; phase: string }> = [
 ];
 
 export function derivePhase(branch: string | null, recentPaths: string[]): string {
+  return derivePhaseWithSource(branch, recentPaths).phase;
+}
+
+export function derivePhaseWithSource(
+  branch: string | null,
+  recentPaths: string[],
+  projectName?: string | null
+): DerivedPhaseResult {
   const branchValue = (branch ?? "").toLowerCase();
   for (const rule of BRANCH_RULES) {
     if (rule.keywords.some((keyword) => branchValue.includes(keyword))) {
-      return rule.phase;
+      return {
+        phase: rule.phase,
+        source: "git"
+      };
     }
   }
 
@@ -88,12 +106,26 @@ export function derivePhase(branch: string | null, recentPaths: string[]): strin
     const normalizedPath = recentPath.toLowerCase().replace(/\\/g, "/");
     for (const rule of PATH_RULES) {
       if (rule.keywords.some((keyword) => matchesKeyword(normalizedPath, keyword))) {
-        return rule.phase;
+        return {
+          phase: rule.phase,
+          source: "file-heuristic"
+        };
       }
     }
   }
 
-  return describeRecentWork(recentPaths[0] ?? "");
+  const fallback = describeRecentWork(recentPaths[0] ?? "", projectName);
+  if (fallback === "In Progress") {
+    return {
+      phase: fallback,
+      source: "generic"
+    };
+  }
+
+  return {
+    phase: fallback,
+    source: "file-heuristic"
+  };
 }
 
 function matchesKeyword(normalizedPath: string, keyword: string): boolean {
@@ -108,7 +140,7 @@ function matchesKeyword(normalizedPath: string, keyword: string): boolean {
   return normalizedPath.includes(keyword);
 }
 
-function describeRecentWork(recentPath: string): string {
+function describeRecentWork(recentPath: string, projectName?: string | null): string {
   if (!recentPath) {
     return "In Progress";
   }
@@ -122,9 +154,24 @@ function describeRecentWork(recentPath: string): string {
     return "In Progress";
   }
 
+  const normalizedProjectName = normalizeComparableValue(projectName ?? "");
+  const normalizedLabel = normalizeComparableValue(label);
+  if (normalizedProjectName && normalizedLabel && normalizedLabel === normalizedProjectName) {
+    return "In Progress";
+  }
+
   return `Editing ${label}`;
 }
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeComparableValue(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[_/-]+/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }

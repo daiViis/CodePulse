@@ -1,168 +1,45 @@
-# Discord Rich Presence Watcher
+# CodePulse Knowledge Pack
 
-Standalone local utility for keeping your Discord Rich Presence updated while you work across local coding projects with Codex CLI or any other editor/tool. It runs independently from the repos you work on and only needs one global config.
+This `docs/` folder is a code-derived knowledge base for the current repository state.
 
-## What it does
+It is intended for NotebookLM ingestion, so the content is split into focused documents instead of one giant dump.
 
-- Watches one or more workspace root folders that contain your coding projects
-- Detects the currently active project from recent file activity
-- Uses the repo or folder name as the project name automatically
-- Derives the current phase from the git branch and recently changed files
-- Starts a fresh elapsed timer when you switch to another active project
-- Falls back to `Idle` after the inactivity timeout
-- Retries Discord IPC automatically if Discord is closed and opened later
+## What This App Is
 
-Target Rich Presence while active:
+CodePulse is a Windows Electron desktop utility that updates Discord Rich Presence based on coding activity.
 
-```text
-Working
-Project: Feign Overlay - Phase: UI Work
-```
+At runtime it combines:
 
-## Runtime choice
+1. File-system activity inside a configured watched workspace folder.
+2. Git metadata, mainly repository root detection and current branch name.
+3. Codex runtime context from local process/session artifacts in `~/.codex`.
+4. Optional OpenAI labeling that turns sanitized context into a short activity label.
 
-This utility uses Node.js with TypeScript:
+The app then publishes a Discord Rich Presence payload and mirrors its internal state in a compact desktop window plus system tray.
 
-- Good fit for a small Windows background utility
-- Easy file watching and named-pipe IPC for Discord
-- Minimal dependency surface
-- Simple one-click startup via `start.bat`
+## Document Map
 
-Runtime npm dependencies are intentionally avoided. The only npm packages are TypeScript build tools.
+- `overview.md`: product-level description, capabilities, constraints, terminology, and behavior summary.
+- `architecture.md`: system architecture, runtime flow, data model, and control flow between modules.
+- `runtime-behavior.md`: startup, watcher loop, project detection, activity detection, Discord publishing, and session handling.
+- `configuration-and-operations.md`: config files, settings persistence, environment variables, build/run/distribution behavior, and operations notes.
+- `data-models-and-schemas.md`: type-level reference for configs, snapshots, statuses, and important derived data.
+- `module-reference.md`: module-by-module source reference for `src/`, `scripts/`, and key root files.
+- `implementation-notes.md`: detailed observations, tradeoffs, quirks, and likely maintenance risks.
 
-## Project structure
+## High-Level Summary
 
-```text
-Rich_Presence_Watcher/
-  README.md
-  package.json
-  start.bat
-  tsconfig.json
-  watcher.config.example.json
-  src/
-    config.ts
-    discordIpc.ts
-    git.ts
-    index.ts
-    phase.ts
-    projectResolver.ts
-    types.ts
-    utils.ts
-    watcherApp.ts
-```
+- Primary runtime shell: Electron.
+- Core engine: `PresenceWatcherApp`.
+- Discord transport: named pipe IPC to local Discord desktop app.
+- Current watched workspace model: one folder selected in desktop settings.
+- Legacy compatibility: `watcher.config.json` still provides the Discord application ID and can seed an initial workspace root.
+- Optional AI enhancement: OpenAI Responses API using a sanitized context payload and cached labels.
+- UI model: a tiny frameless status window plus a settings modal and tray menu.
 
-## One-time setup
+## Important Current-State Notes
 
-### 1. Install Node.js
-
-Node.js 20+ is required.
-
-### 2. Create a Discord application
-
-Discord Rich Presence requires an application ID. This is the only Discord-specific setup step.
-
-1. Open the Discord Developer Portal.
-2. Create a new application.
-3. Copy the **Application ID**.
-4. Paste it into `watcher.config.json` as `discordClientId`.
-
-You do not need per-project presence setup.
-
-### 3. Create your local config
-
-Copy `watcher.config.example.json` to `watcher.config.json`, then edit it.
-
-`watcher.config.json` is ignored by git so you can keep local paths and your Discord application ID out of the repository.
-
-### 4. Configure watched workspace roots
-
-Edit `watcher.config.json` and set:
-
-- `discordClientId`: your Discord application ID
-- `workspaceRoots`: one or more root folders that contain the projects you actually work in
-- `pollIntervalSeconds`: usually `10` to `15`
-- `inactivityTimeoutMinutes`: default `30`
-
-Example:
-
-```json
-{
-  "discordClientId": "123456789012345678",
-  "workspaceRoots": [
-    "C:\\path\\to\\your\\projects"
-  ],
-  "pollIntervalSeconds": 15,
-  "inactivityTimeoutMinutes": 30
-}
-```
-
-## Install steps
-
-From this project folder:
-
-```powershell
-npm install
-npm run build
-```
-
-`start.bat` will also do both automatically if needed.
-
-## Run steps
-
-### One-click
-
-Double-click `start.bat`.
-
-### Terminal
-
-```powershell
-npm run build
-npm start
-```
-
-## How detection works
-
-### Active project detection
-
-- The watcher creates a recursive file watcher for each configured workspace root.
-- Every file change is mapped to a project root.
-- If the changed file is inside a git repo, the repo root becomes the active project candidate.
-- If the changed file is not inside a git repo, the first folder under the configured workspace root is used as the project.
-- The most recently active project inside the inactivity window wins.
-- The watcher ignores noisy folders such as `.git`, `node_modules`, `dist`, `build`, `coverage`, and the watcher project itself.
-
-### Phase detection
-
-Branch rules are checked first:
-
-- `fix` or `bugfix` => `Bug Fixing`
-- `feature` or `feat` => `Feature Development`
-- `refactor` => `Refactoring`
-- `test` => `Testing`
-- `docs` => `Documentation`
-
-If no branch rule matches, recent file paths are used:
-
-- `components`, `ui`, `pages`, `styles` => `UI Work`
-- `api`, `server`, `routes`, `controllers`, `db` => `Backend`
-- `tests`, `spec` => `Testing`
-- `docs` => `Documentation`
-- `config`, `scripts`, `build` => `Project Setup`
-
-Fallback:
-
-- `In Progress`
-
-### Session timing
-
-- A session starts when file activity is detected for a project.
-- The timer stays attached to that same project while it remains the most recently active one.
-- If activity moves to another project, a new session starts from that project's first detected activity time.
-- If no project activity is detected within the inactivity timeout, Rich Presence switches to `Idle` and the timer is removed.
-
-## Notes
-
-- Discord does not need to be open before you launch the watcher.
-- If Discord is closed, the watcher keeps running and retries automatically.
-- This utility does not modify or embed anything inside the projects you work on.
-- The watcher is designed for local file-activity-based automation. It does not require per-project config, auth, cloud services, databases, or MCP.
+- The repository name still references `Rich_Presence_Watcher`, but the product identity in code and packaging is now `CodePulse`.
+- The legacy config schema still mentions `workspaceRoots`, but current settings-driven operation effectively watches one selected folder via `watchedFolderPath`.
+- The desktop app is now the default entrypoint. CLI watcher mode still exists as `npm run watcher:cli`.
+- The app is Windows-oriented. Discord IPC uses Windows named pipes and the Electron packaging target is Windows portable.

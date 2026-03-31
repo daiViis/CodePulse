@@ -1,20 +1,46 @@
 {
-  "name": "discord-rich-presence-watcher",
+  "name": "codepulse",
   "version": "1.0.0",
   "private": true,
-  "description": "Standalone local Discord Rich Presence watcher for coding activity.",
-  "main": "dist/index.js",
+  "description": "CodePulse is a Windows desktop utility for Discord Rich Presence while coding.",
+  "main": "dist/electron/main.js",
   "type": "commonjs",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copyRendererAssets.cjs",
     "check": "tsc --noEmit -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "electron .",
+    "dev": "npm run build && electron .",
+    "watcher:cli": "npm run build && node dist/index.js",
+    "dist:win": "npm run build && electron-builder --win portable"
   },
   "devDependencies": {
     "@types/node": "^22.10.10",
+    "electron": "^35.1.5",
+    "electron-builder": "^26.0.12",
     "typescript": "^5.7.3"
+  },
+  "build": {
+    "appId": "com.codex.codepulse",
+    "productName": "CodePulse",
+    "icon": "icon.png",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "watcher.config.example.json"
+    ],
+    "win": {
+      "icon": "icon.png",
+      "signAndEditExecutable": false,
+      "target": [
+        "portable"
+      ],
+      "artifactName": "${productName}-${version}.${ext}"
+    }
   }
 }

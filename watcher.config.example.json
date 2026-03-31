@@ -1,8 +1,3 @@
 {
-  "discordClientId": "PASTE_YOUR_DISCORD_APPLICATION_ID_HERE",
-  "workspaceRoots": [
-    "C:\\path\\to\\your\\projects"
-  ],
-  "pollIntervalSeconds": 15,
-  "inactivityTimeoutMinutes": 30
+  "discordClientId": "PASTE_YOUR_DISCORD_APPLICATION_ID_HERE"
 }

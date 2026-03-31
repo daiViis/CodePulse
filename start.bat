@@ -8,12 +8,8 @@ if not exist node_modules (
   if errorlevel 1 goto :error
 )
 
-echo Building watcher...
-call npm run build
-if errorlevel 1 goto :error
-
-echo Starting watcher...
-node dist\index.js
+echo Starting CodePulse...
+call npm run dev
 goto :eof
 
 :error
