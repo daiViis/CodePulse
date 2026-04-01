@@ -24,6 +24,12 @@
   100% { background-position: 100% 100%; }
 }
 
+@keyframes status-pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.7; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -269,6 +275,7 @@ input {
   border-radius: 999px;
   background: var(--muted);
   transition: all 0.3s ease;
+  animation: status-pulse 3s infinite ease-in-out;
 }
 
 .status-working,
