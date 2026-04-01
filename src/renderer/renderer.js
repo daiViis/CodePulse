@@ -16,14 +16,16 @@ const statusDot = document.getElementById("statusDot");
 const aiDot = document.getElementById("aiDot");
 const discordDot = document.getElementById("discordDot");
 const statusValue = document.getElementById("statusValue");
+const toolBadge = document.getElementById("toolBadge");
 const projectValue = document.getElementById("projectValue");
 const phaseValue = document.getElementById("phaseValue");
+const fileValue = document.getElementById("fileValue");
+const diffValue = document.getElementById("diffValue");
 const sessionValue = document.getElementById("sessionValue");
 const aiValue = document.getElementById("aiValue");
 const connectionValue = document.getElementById("connectionValue");
 const settingsButton = document.getElementById("settingsButton");
 const minimizeButton = document.getElementById("minimizeButton");
-const maximizeButton = document.getElementById("maximizeButton");
 const closeButton = document.getElementById("closeButton");
 const closeSettingsButton = document.getElementById("closeSettingsButton");
 const cancelSettingsButton = document.getElementById("cancelSettingsButton");
@@ -38,20 +40,46 @@ const detailsTemplateInput = document.getElementById("detailsTemplateInput");
 const stateTemplateInput = document.getElementById("stateTemplateInput");
 const aiLabelingEnabledInput = document.getElementById("aiLabelingEnabledInput");
 const openAiModelInput = document.getElementById("openAiModelInput");
+const openAiApiKeyInput = document.getElementById("openAiApiKeyInput");
+const geminiApiKeyInput = document.getElementById("geminiApiKeyInput");
 const pollIntervalInput = document.getElementById("pollIntervalInput");
 const inactivityTimeoutInput = document.getElementById("inactivityTimeoutInput");
 const showElapsedTimeInput = document.getElementById("showElapsedTimeInput");
 const minimizeToTrayInput = document.getElementById("minimizeToTrayInput");
 const launchOnStartupInput = document.getElementById("launchOnStartupInput");
+const modelSelectContainer = openAiModelInput.parentElement;
+
+function updateModelIcon() {
+  const model = openAiModelInput.value.toLowerCase();
+  if (model.includes("gpt")) {
+    modelSelectContainer.dataset.company = "openai";
+  } else if (model.includes("gemini")) {
+    modelSelectContainer.dataset.company = "google";
+  } else if (model) {
+    modelSelectContainer.dataset.company = "other";
+  } else {
+    delete modelSelectContainer.dataset.company;
+  }
+}
+
+openAiModelInput.addEventListener("input", updateModelIcon);
+
+openAiModelInput.addEventListener("mousedown", () => {
+  openAiModelInput.setAttribute("list", "");
+});
+
+openAiModelInput.addEventListener("mouseup", () => {
+  openAiModelInput.setAttribute("list", "aiModels");
+  openAiModelInput.focus();
+});
+
+openAiModelInput.addEventListener("focus", () => {
+  openAiModelInput.setAttribute("list", "aiModels");
+});
 
 let currentSnapshot = null;
 let currentSettings = null;
-
-async function refreshWindowButtons() {
-  const isMaximized = await window.presenceWatcher.isWindowMaximized();
-  maximizeButton.textContent = isMaximized ? "o" : "+";
-  maximizeButton.setAttribute("aria-label", isMaximized ? "Restore window" : "Maximize window");
-}
+let wasMaximizedBeforeSettings = false;
 
 function formatElapsedTime(startedAt) {
   if (!startedAt) {
@@ -74,8 +102,36 @@ function renderSnapshot(snapshot) {
   currentSnapshot = snapshot;
 
   statusValue.textContent = STATUS_LABELS[snapshot.status] ?? "Waiting";
+
+  if (snapshot.cliTool) {
+    toolBadge.textContent = snapshot.cliTool;
+    toolBadge.classList.remove("hidden");
+  } else {
+    toolBadge.classList.add("hidden");
+  }
+
   projectValue.textContent = snapshot.projectName ?? "No active project";
   phaseValue.textContent = snapshot.phase ?? (snapshot.status === "error" ? "Check settings" : "Waiting for activity");
+
+  if (snapshot.lastFile) {
+    fileValue.textContent = snapshot.lastFile;
+    fileValue.classList.remove("hidden");
+  } else {
+    fileValue.classList.add("hidden");
+  }
+
+  if (snapshot.diffStats && (snapshot.diffStats.additions > 0 || snapshot.diffStats.deletions > 0)) {
+    const { additions, deletions, filesChanged } = snapshot.diffStats;
+    diffValue.innerHTML = `
+      <span class="diff-files">${filesChanged} file${filesChanged !== 1 ? "s" : ""}</span>
+      <span class="diff-add">+${additions}</span>
+      <span class="diff-remove">-${deletions}</span>
+    `;
+    diffValue.classList.remove("hidden");
+  } else {
+    diffValue.classList.add("hidden");
+  }
+
   sessionValue.textContent = formatElapsedTime(snapshot.sessionStartedAt);
 
   if (snapshot.discordState === "connected") {
@@ -117,7 +173,10 @@ function applySettingsToForm(settings) {
   detailsTemplateInput.value = settings.detailsTemplate ?? "";
   stateTemplateInput.value = settings.stateTemplate ?? "";
   aiLabelingEnabledInput.checked = Boolean(settings.aiLabelingEnabled);
-  openAiModelInput.value = settings.openAiModel ?? "gpt-5.4-mini";
+  openAiModelInput.value = settings.openAiModel ?? "gpt-5.4-nano";
+  updateModelIcon();
+  openAiApiKeyInput.value = settings.openAiApiKey ?? "";
+  geminiApiKeyInput.value = settings.geminiApiKey ?? "";
   pollIntervalInput.value = String(settings.pollIntervalSeconds ?? 15);
   inactivityTimeoutInput.value = String(settings.inactivityTimeoutMinutes ?? 30);
   showElapsedTimeInput.checked = Boolean(settings.showElapsedTime);
@@ -126,8 +185,18 @@ function applySettingsToForm(settings) {
 
   if (!settings.discordClientIdConfigured) {
     setSettingsStatus("Discord app ID is not configured yet. Set it in watcher.config.json.", "error");
-  } else if (settings.aiLabelingEnabled && !settings.openAiApiKeyConfigured) {
-    setSettingsStatus("AI labeling is enabled, but OPENAI_API_KEY is missing from .env.", "error");
+  } else if (settings.aiLabelingEnabled) {
+    const model = openAiModelInput.value.toLowerCase();
+    const needsGemini = model.includes("gemini");
+    const needsOpenAi = !needsGemini;
+
+    if (needsOpenAi && !settings.openAiApiKeyConfigured) {
+      setSettingsStatus("AI labeling is enabled, but OpenAI API key is missing.", "error");
+    } else if (needsGemini && !settings.geminiApiKeyConfigured) {
+      setSettingsStatus("AI labeling is enabled, but Gemini API key is missing.", "error");
+    } else {
+      clearSettingsStatus();
+    }
   } else {
     clearSettingsStatus();
   }
@@ -141,6 +210,8 @@ function collectSettingsFromForm() {
     stateTemplate: stateTemplateInput.value.trim(),
     aiLabelingEnabled: aiLabelingEnabledInput.checked,
     openAiModel: openAiModelInput.value.trim(),
+    openAiApiKey: openAiApiKeyInput.value.trim(),
+    geminiApiKey: geminiApiKeyInput.value.trim(),
     pollIntervalSeconds: Number(pollIntervalInput.value),
     inactivityTimeoutMinutes: Number(inactivityTimeoutInput.value),
     showElapsedTime: showElapsedTimeInput.checked,
@@ -149,9 +220,14 @@ function collectSettingsFromForm() {
   };
 }
 
-function openSettings() {
+async function openSettings() {
   if (!currentSettings) {
     return;
+  }
+
+  wasMaximizedBeforeSettings = await window.presenceWatcher.isWindowMaximized();
+  if (!wasMaximizedBeforeSettings) {
+    await window.presenceWatcher.maximizeWindow();
   }
 
   applySettingsToForm(currentSettings);
@@ -159,8 +235,13 @@ function openSettings() {
   usernameInput.focus();
 }
 
-function closeSettings() {
+async function closeSettings() {
   settingsOverlay.classList.add("hidden");
+
+  if (!wasMaximizedBeforeSettings) {
+    await window.presenceWatcher.unmaximizeWindow();
+  }
+
   if (currentSettings?.discordClientIdConfigured) {
     clearSettingsStatus();
   }
@@ -231,16 +312,11 @@ async function boot() {
 }
 
 settingsButton.addEventListener("click", () => {
-  openSettings();
+  void openSettings();
 });
 
 minimizeButton.addEventListener("click", () => {
   void window.presenceWatcher.minimizeWindow();
-});
-
-maximizeButton.addEventListener("click", async () => {
-  await window.presenceWatcher.toggleMaximizeWindow();
-  await refreshWindowButtons();
 });
 
 closeButton.addEventListener("click", () => {
@@ -248,11 +324,11 @@ closeButton.addEventListener("click", () => {
 });
 
 closeSettingsButton.addEventListener("click", () => {
-  closeSettings();
+  void closeSettings();
 });
 
 cancelSettingsButton.addEventListener("click", () => {
-  closeSettings();
+  void closeSettings();
 });
 
 browseFolderButton.addEventListener("click", () => {
@@ -261,7 +337,7 @@ browseFolderButton.addEventListener("click", () => {
 
 settingsOverlay.addEventListener("click", (event) => {
   if (event.target === settingsOverlay) {
-    closeSettings();
+    void closeSettings();
   }
 });
 
@@ -271,12 +347,8 @@ settingsForm.addEventListener("submit", (event) => {
 
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !settingsOverlay.classList.contains("hidden")) {
-    closeSettings();
+    void closeSettings();
   }
-});
-
-window.addEventListener("resize", () => {
-  void refreshWindowButtons();
 });
 
 setInterval(() => {
@@ -288,4 +360,3 @@ setInterval(() => {
 }, 1000);
 
 void boot();
-void refreshWindowButtons();

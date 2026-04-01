@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { CodexContextDetector, CodexRuntimeContext } from "./codexContext";
 import { DiscordIpcClient } from "./discordIpc";
-import { readBranchName } from "./git";
+import { readBranchName, readGitDiffStats } from "./git";
 import { OpenAiActivityLabeler } from "./openAiActivityLabeler";
 import { derivePhaseWithSource } from "./phase";
 import { renderPresenceTemplate } from "./presenceTemplates";
@@ -53,6 +53,8 @@ export class PresenceWatcherApp {
   private tickInFlight = false;
   private tickQueued = false;
   private currentSnapshot: WatcherSnapshot = createDefaultWatcherSnapshot();
+  private readonly appStartedAt = Date.now();
+  private lastEditedFileName: string | null = null;
 
   constructor(private config: LoadedConfig) {
     this.discord = new DiscordIpcClient(config.discordClientId);
@@ -61,6 +63,7 @@ export class PresenceWatcherApp {
         enabled: config.aiLabelingEnabled,
         model: config.openAiModel,
         apiKey: config.openAiApiKey,
+        geminiApiKey: config.geminiApiKey,
         envLoaded: config.openAiEnvLoaded,
         envPath: config.openAiEnvPath
       },
@@ -149,6 +152,7 @@ export class PresenceWatcherApp {
       enabled: nextConfig.aiLabelingEnabled,
       model: nextConfig.openAiModel,
       apiKey: nextConfig.openAiApiKey,
+      geminiApiKey: nextConfig.geminiApiKey,
       envLoaded: nextConfig.openAiEnvLoaded,
       envPath: nextConfig.openAiEnvPath
     });
@@ -212,6 +216,7 @@ export class PresenceWatcherApp {
       return;
     }
 
+    this.lastEditedFileName = path.basename(absolutePath);
     const key = normalizePathCase(context.projectRoot);
     const current = this.projectActivity.get(key);
     const branch = context.repoRoot ? readBranchName(context.repoRoot) : null;
@@ -269,7 +274,9 @@ export class PresenceWatcherApp {
     const presence = this.buildPresence(projectSelection, codexContext, now);
     const discordConnected = await this.discord.setPresence(presence);
 
-    this.publishSnapshot(this.buildSnapshot(projectSelection.activeProject, presence, discordConnected, now));
+    this.publishSnapshot(
+      this.buildSnapshot(projectSelection.activeProject, presence, discordConnected, codexContext.cliTool, now)
+    );
     this.logDetection(projectSelection.activeProject, codexContext);
     this.logStatus(presence, now);
   }
@@ -412,7 +419,8 @@ export class PresenceWatcherApp {
     const context = {
       username: this.config.username,
       project: session.projectName,
-      phase: session.phase
+      phase: session.phase,
+      file: this.lastEditedFileName ?? "none"
     };
 
     return {
@@ -485,16 +493,19 @@ export class PresenceWatcherApp {
       return now;
     }
 
-    return Math.min(now, earliestCandidate);
+    // Ensure the session start is NOT earlier than when the CodePulse app was started.
+    return Math.max(Math.min(now, earliestCandidate), this.appStartedAt);
   }
 
   private buildSnapshot(
     activeProject: ProjectActivity | null,
     presence: PresenceState,
     discordConnected: boolean,
+    cliTool: "Codex" | "Gemini" | null,
     now: number
   ): WatcherSnapshot {
     const aiStatus = this.activityLabeler.getStatus();
+    const diffStats = activeProject?.repoRoot ? readGitDiffStats(activeProject.repoRoot) : null;
 
     if (!this.session || !activeProject) {
       return {
@@ -503,6 +514,8 @@ export class PresenceWatcherApp {
         status: "idle",
         projectName: null,
         phase: null,
+        lastFile: this.lastEditedFileName,
+        diffStats,
         activitySource: null,
         projectSource: null,
         sessionStartedAt: null,
@@ -511,6 +524,7 @@ export class PresenceWatcherApp {
         branch: null,
         watcherMessage: "Waiting for coding activity in the configured workspace roots.",
         discordState: discordConnected ? "connected" : "disconnected",
+        cliTool,
         aiState: aiStatus.state,
         aiMessage: aiStatus.message,
         aiModel: aiStatus.model,
@@ -527,6 +541,8 @@ export class PresenceWatcherApp {
       status: "working",
       projectName: this.session.projectName,
       phase: this.session.phase,
+      lastFile: this.lastEditedFileName,
+      diffStats,
       activitySource: this.session.activitySource,
       projectSource: this.session.projectSource,
       sessionStartedAt: this.config.showElapsedTime ? this.session.startedAt : null,
@@ -535,6 +551,7 @@ export class PresenceWatcherApp {
       branch: activeProject.branch,
       watcherMessage: `Watching ${this.config.workspaceRoots.length} workspace root(s).`,
       discordState: discordConnected ? "connected" : "disconnected",
+      cliTool,
       aiState: aiStatus.state,
       aiMessage: aiStatus.message,
       aiModel: aiStatus.model,

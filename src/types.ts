@@ -12,6 +12,8 @@ export interface AppSettings {
   stateTemplate: string;
   aiLabelingEnabled: boolean;
   openAiModel: string;
+  openAiApiKey?: string;
+  geminiApiKey?: string;
   pollIntervalSeconds: number;
   inactivityTimeoutMinutes: number;
   showElapsedTime: boolean;
@@ -25,6 +27,8 @@ export interface LoadedAppSettings extends AppSettings {
   discordClientId: string;
   discordClientIdSource: "settings" | "legacy-config" | "environment" | "missing";
   systemUsername: string;
+  openAiApiKeyConfigured: boolean;
+  geminiApiKeyConfigured: boolean;
 }
 
 export interface LoadedConfig {
@@ -41,6 +45,7 @@ export interface LoadedConfig {
   aiLabelingEnabled: boolean;
   openAiModel: string;
   openAiApiKey: string;
+  geminiApiKey: string;
   openAiEnvLoaded: boolean;
   openAiEnvPath: string | null;
   showElapsedTime: boolean;
@@ -69,6 +74,9 @@ export type ProjectSource =
   | "codex-session"
   | "codex-process"
   | "codex-artifact"
+  | "gemini-session"
+  | "gemini-process"
+  | "gemini-artifact"
   | "file-heuristic";
 
 export interface SessionState {
@@ -92,6 +100,7 @@ export interface PresenceTemplateContext {
   username: string;
   project: string;
   phase: string;
+  file: string;
 }
 
 export interface ResolvedProjectContext {
@@ -110,6 +119,12 @@ export interface WatcherSnapshot {
   status: WatcherStatus;
   projectName: string | null;
   phase: string | null;
+  lastFile: string | null;
+  diffStats: {
+    additions: number;
+    deletions: number;
+    filesChanged: number;
+  } | null;
   activitySource: ActivitySource | null;
   projectSource: ProjectSource | null;
   sessionStartedAt: number | null;
@@ -118,6 +133,7 @@ export interface WatcherSnapshot {
   branch: string | null;
   watcherMessage: string;
   discordState: DiscordConnectionState;
+  cliTool: "Codex" | "Gemini" | null;
   aiState: AiLabelingState;
   aiMessage: string;
   aiModel: string | null;

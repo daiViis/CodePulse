@@ -57,11 +57,6 @@ const IGNORED_FILE_SUFFIXES = [".log", ".tmp", ".temp", ".swp", ".swo", ".tsbuil
 
 export function isIgnoredPath(absolutePath: string, appRoot: string): boolean {
   const normalizedPath = normalizePathCase(absolutePath);
-  const normalizedAppRoot = normalizePathCase(appRoot);
-
-  if (normalizedPath === normalizedAppRoot || normalizedPath.startsWith(`${normalizedAppRoot}${path.sep}`)) {
-    return true;
-  }
 
   const baseName = path.basename(normalizedPath);
   if (baseName === "4913" || IGNORED_FILE_SUFFIXES.some((suffix) => baseName.endsWith(suffix))) {

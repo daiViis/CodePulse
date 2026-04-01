@@ -9,7 +9,7 @@ const SETTINGS_FILENAME = "watcher.settings.json";
 
 const DEFAULT_DETAILS_TEMPLATE = "{username} is working on {project}";
 const DEFAULT_STATE_TEMPLATE = "{phase}";
-const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
+const DEFAULT_OPENAI_MODEL = "gpt-5.4-nano";
 
 const LEGACY_CONFIG_TEMPLATE = `${JSON.stringify(
   {
@@ -67,7 +67,9 @@ export function loadAppSettings(options: LoadConfigOptions): LoadedAppSettings {
     legacyConfigPath: legacyConfig.configPath,
     discordClientId: legacyConfig.discordClientId,
     discordClientIdSource: legacyConfig.discordClientIdSource,
-    systemUsername
+    systemUsername,
+    openAiApiKeyConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
+    geminiApiKeyConfigured: Boolean(process.env.GEMINI_API_KEY?.trim())
   };
 }
 
@@ -94,10 +96,48 @@ export function saveAppSettings(
   fs.mkdirSync(path.dirname(currentSettings.settingsPath), { recursive: true });
   fs.writeFileSync(currentSettings.settingsPath, `${JSON.stringify(nextSettings, null, 2)}\n`, "utf8");
 
+  saveToEnv(normalizedOptions.appRoot, {
+    OPENAI_API_KEY: nextSettings.openAiApiKey,
+    GEMINI_API_KEY: nextSettings.geminiApiKey
+  });
+
   return {
     ...currentSettings,
-    ...nextSettings
+    ...nextSettings,
+    openAiApiKeyConfigured: Boolean(nextSettings.openAiApiKey || process.env.OPENAI_API_KEY),
+    geminiApiKeyConfigured: Boolean(nextSettings.geminiApiKey || process.env.GEMINI_API_KEY)
   };
+}
+
+function saveToEnv(appRoot: string, vars: Record<string, string | undefined>): void {
+  const envPath = path.join(appRoot, ".env");
+  let content = "";
+
+  if (fs.existsSync(envPath)) {
+    content = fs.readFileSync(envPath, "utf8");
+  }
+
+  const lines = content.split(/\r?\n/);
+
+  for (const [key, value] of Object.entries(vars)) {
+    if (value === undefined) {
+      continue;
+    }
+
+    const entry = `${key}=${value}`;
+    const index = lines.findIndex((line) => line.startsWith(`${key}=`));
+
+    if (index !== -1) {
+      lines[index] = entry;
+    } else {
+      lines.push(entry);
+    }
+
+    // Also update current process env so it's available immediately
+    process.env[key] = value;
+  }
+
+  fs.writeFileSync(envPath, lines.join("\n"), "utf8");
 }
 
 export function getDefaultSettings(systemUsername = resolveSystemUsername()): AppSettings {
@@ -108,6 +148,8 @@ export function getDefaultSettings(systemUsername = resolveSystemUsername()): Ap
     stateTemplate: DEFAULT_STATE_TEMPLATE,
     aiLabelingEnabled: false,
     openAiModel: DEFAULT_OPENAI_MODEL,
+    openAiApiKey: "",
+    geminiApiKey: "",
     pollIntervalSeconds: 15,
     inactivityTimeoutMinutes: 30,
     showElapsedTime: true,
@@ -149,8 +191,9 @@ export function createWatcherConfig(appRoot: string, settings: LoadedAppSettings
     stateTemplate: settings.stateTemplate,
     aiLabelingEnabled: settings.aiLabelingEnabled,
     openAiModel: settings.openAiModel,
-    openAiApiKey: process.env.OPENAI_API_KEY?.trim() ?? "",
-    openAiEnvLoaded: envDiagnostics.loadedKeys.includes("OPENAI_API_KEY"),
+    openAiApiKey: (process.env.OPENAI_API_KEY ?? settings.openAiApiKey ?? "").trim(),
+    geminiApiKey: (process.env.GEMINI_API_KEY ?? settings.geminiApiKey ?? "").trim(),
+    openAiEnvLoaded: envDiagnostics.loadedKeys.includes("OPENAI_API_KEY") || envDiagnostics.loadedKeys.includes("GEMINI_API_KEY"),
     openAiEnvPath,
     showElapsedTime: settings.showElapsedTime
   };
@@ -186,6 +229,8 @@ function normalizeSettings(
   const detailsTemplate = normalizeTemplate(input?.detailsTemplate, DEFAULT_DETAILS_TEMPLATE);
   const stateTemplate = normalizeTemplate(input?.stateTemplate, DEFAULT_STATE_TEMPLATE);
   const openAiModel = normalizeModel(input?.openAiModel, DEFAULT_OPENAI_MODEL);
+  const openAiApiKey = typeof input?.openAiApiKey === "string" ? input.openAiApiKey.trim() : "";
+  const geminiApiKey = typeof input?.geminiApiKey === "string" ? input.geminiApiKey.trim() : "";
   const pollIntervalSeconds = normalizeNumber(
     input?.pollIntervalSeconds,
     defaults.pollIntervalSeconds,
@@ -216,6 +261,8 @@ function normalizeSettings(
     stateTemplate,
     aiLabelingEnabled: normalizeBoolean(input?.aiLabelingEnabled, defaults.aiLabelingEnabled),
     openAiModel,
+    openAiApiKey,
+    geminiApiKey,
     pollIntervalSeconds,
     inactivityTimeoutMinutes,
     showElapsedTime: normalizeBoolean(input?.showElapsedTime, defaults.showElapsedTime),

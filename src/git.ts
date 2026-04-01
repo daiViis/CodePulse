@@ -1,5 +1,12 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+
+export interface GitDiffStats {
+  filesChanged: number;
+  additions: number;
+  deletions: number;
+}
 
 export function findGitRoot(startDirectory: string, stopDirectory: string): string | null {
   let current = path.resolve(startDirectory);
@@ -45,6 +52,34 @@ export function readBranchName(repoRoot: string): string | null {
   }
 
   return null;
+}
+
+export function readGitDiffStats(repoRoot: string): GitDiffStats | null {
+  try {
+    const output = execFileSync("git", ["diff", "--shortstat"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000
+    }).trim();
+
+    if (!output) {
+      return { filesChanged: 0, additions: 0, deletions: 0 };
+    }
+
+    // Example: " 2 files changed, 10 additions(+), 5 deletions(-)"
+    const filesChangedMatch = /(\d+) file/.exec(output);
+    const additionsMatch = /(\d+) insertion/.exec(output);
+    const deletionsMatch = /(\d+) deletion/.exec(output);
+
+    return {
+      filesChanged: filesChangedMatch ? parseInt(filesChangedMatch[1], 10) : 0,
+      additions: additionsMatch ? parseInt(additionsMatch[1], 10) : 0,
+      deletions: deletionsMatch ? parseInt(deletionsMatch[1], 10) : 0
+    };
+  } catch {
+    return null;
+  }
 }
 
 function resolveGitDirectory(repoRoot: string): string | null {

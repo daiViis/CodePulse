@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("presenceWatcher", {
     });
   },
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke("window:minimize"),
+  maximizeWindow: (): Promise<void> => ipcRenderer.invoke("window:maximize"),
+  unmaximizeWindow: (): Promise<void> => ipcRenderer.invoke("window:unmaximize"),
   toggleMaximizeWindow: (): Promise<boolean> => ipcRenderer.invoke("window:toggle-maximize"),
   isWindowMaximized: (): Promise<boolean> => ipcRenderer.invoke("window:is-maximized"),
   getSettings: (): Promise<RendererSettings> => ipcRenderer.invoke("settings:get"),

@@ -6,10 +6,10 @@ import { PresenceWatcherApp } from "../watcherApp";
 import { createDefaultWatcherSnapshot, createErrorWatcherSnapshot } from "../watcherSnapshot";
 
 const APP_NAME = "CodePulse";
-const WINDOW_WIDTH = 320;
-const WINDOW_HEIGHT = 150;
-const MIN_WINDOW_WIDTH = 260;
-const MIN_WINDOW_HEIGHT = 120;
+const WINDOW_WIDTH = 340;
+const WINDOW_HEIGHT = 210;
+const MIN_WINDOW_WIDTH = 300;
+const MIN_WINDOW_HEIGHT = 180;
 const TITLE_BAR_HEIGHT = 30;
 const WATCHER_SNAPSHOT_CHANNEL = "watcher:snapshot";
 
@@ -66,6 +66,14 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle("window:minimize", () => {
     mainWindow?.minimize();
+  });
+
+  ipcMain.handle("window:maximize", () => {
+    mainWindow?.maximize();
+  });
+
+  ipcMain.handle("window:unmaximize", () => {
+    mainWindow?.unmaximize();
   });
 
   ipcMain.handle("window:toggle-maximize", () => {
@@ -409,6 +417,8 @@ function serializeSettings() {
     stateTemplate: settings.stateTemplate,
     aiLabelingEnabled: settings.aiLabelingEnabled,
     openAiModel: settings.openAiModel,
+    openAiApiKey: settings.openAiApiKey,
+    geminiApiKey: settings.geminiApiKey,
     pollIntervalSeconds: settings.pollIntervalSeconds,
     inactivityTimeoutMinutes: settings.inactivityTimeoutMinutes,
     showElapsedTime: settings.showElapsedTime,

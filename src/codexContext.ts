@@ -12,10 +12,17 @@ const HISTORY_TAIL_BYTES = 131072;
 const HISTORY_TAIL_LINES = 300;
 const MAX_ACTIVITY_LENGTH = 120;
 
-type CodexSource = "codex-session" | "codex-process" | "codex-artifact";
+type CodexSource =
+  | "codex-session"
+  | "codex-process"
+  | "codex-artifact"
+  | "gemini-session"
+  | "gemini-process"
+  | "gemini-artifact";
 
 export interface CodexRuntimeContext {
   source: CodexSource | null;
+  cliTool: "Codex" | "Gemini" | null;
   processDetected: boolean;
   processCount: number;
   processNames: string[];
@@ -35,6 +42,7 @@ interface CodexProcess {
 
 interface SessionArtifact {
   sessionId: string;
+  cliTool: "Codex" | "Gemini";
   sessionTitle: string | null;
   workingDirectory: string | null;
   sessionStartedAt: number | null;
@@ -48,12 +56,15 @@ interface Cache<T> {
 }
 
 export class CodexContextDetector {
-  private readonly codexRoot: string;
+  private readonly cliRoots: string[];
   private processCache: Cache<CodexProcess[]> | null = null;
   private latestSessionCache: Cache<SessionArtifact | null> | null = null;
 
-  constructor(codexRoot = path.join(os.homedir(), ".codex")) {
-    this.codexRoot = codexRoot;
+  constructor() {
+    this.cliRoots = [
+      path.join(os.homedir(), ".codex"),
+      path.join(os.homedir(), ".gemini")
+    ];
   }
 
   detect(now: number, inactivityTimeoutMs: number): CodexRuntimeContext {
@@ -74,24 +85,43 @@ export class CodexContextDetector {
     );
     const sessionDetected = Boolean(latestSession);
 
-    let source: CodexSource | null = null;
-    if (processDetected && sessionFresh) {
-      source = "codex-session";
-    } else if (processDetected) {
-      source = "codex-process";
-    } else if (sessionFresh) {
-      source = "codex-artifact";
-    }
-
     const canUseSessionSignals = Boolean(
       latestSession && (sessionFresh || (!processDetected || sessionLikelyMatchesProcess))
     );
+
+    let cliTool: "Codex" | "Gemini" | null = null;
+    if (canUseSessionSignals && latestSession) {
+      cliTool = latestSession.cliTool;
+    } else if (processDetected) {
+      const hasGeminiProcess = processes.some((p) => p.processName.toLowerCase().includes("gemini"));
+      const hasCodexProcess = processes.some((p) => p.processName.toLowerCase().includes("codex"));
+      if (hasGeminiProcess) {
+        cliTool = "Gemini";
+      } else if (hasCodexProcess) {
+        cliTool = "Codex";
+      }
+    }
+
+    let source: CodexSource | null = null;
+    if (processDetected && sessionFresh) {
+      source = cliTool === "Gemini" ? "gemini-session" : "codex-session";
+    } else if (processDetected) {
+      source = cliTool === "Gemini" ? "gemini-process" : "codex-process";
+    } else if (sessionFresh) {
+      source = cliTool === "Gemini" ? "gemini-artifact" : "codex-artifact";
+    }
+
+    if (cliTool) {
+      console.log(`[ai-cli] tool=${cliTool} source=${source} sessionFresh=${sessionFresh} processDetected=${processDetected}`);
+    }
+
     const activity = canUseSessionSignals
       ? pickActivity(latestSession?.recentPrompt ?? null, latestSession?.sessionTitle ?? null)
       : null;
 
     return {
       source,
+      cliTool,
       processDetected,
       processCount: processes.length,
       processNames: processes.map((process) => process.processName),
@@ -110,8 +140,9 @@ export class CodexContextDetector {
       return this.processCache.value;
     }
 
+    // Improved command to get process name and command line to distinguish node processes
     const command =
-      "Get-Process | Where-Object { $_.ProcessName -match 'codex' } | Select-Object ProcessName, StartTime | ConvertTo-Json -Compress";
+      "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'codex|gemini|node' } | Select-Object Name, CommandLine, CreationDate | ConvertTo-Json -Compress";
 
     const parsed = this.runPowerShellJson(command);
     const processRows = toArray(parsed).map((entry) => {
@@ -119,10 +150,19 @@ export class CodexContextDetector {
         return null;
       }
 
-      const processName =
-        typeof (entry as { ProcessName?: unknown }).ProcessName === "string"
-          ? ((entry as { ProcessName: string }).ProcessName ?? "").trim()
-          : "";
+      const row = entry as { Name?: string; CommandLine?: string; CreationDate?: string };
+      const name = (row.Name ?? "").toLowerCase();
+      const cmd = (row.CommandLine ?? "").toLowerCase();
+
+      let processName = "";
+      if (name.includes("codex") || cmd.includes("codex")) {
+        processName = "codex";
+      } else if (name.includes("gemini") || cmd.includes("gemini-cli")) {
+        processName = "gemini";
+      } else if (name.includes("node")) {
+        // If it's a generic node process without gemini/codex in CMD, we skip it
+        return null;
+      }
 
       if (!processName) {
         return null;
@@ -130,7 +170,7 @@ export class CodexContextDetector {
 
       return {
         processName,
-        startedAt: parseTimestamp((entry as { StartTime?: unknown }).StartTime)
+        startedAt: parseTimestamp(row.CreationDate)
       } satisfies CodexProcess;
     });
 
@@ -148,8 +188,48 @@ export class CodexContextDetector {
       return this.latestSessionCache.value;
     }
 
-    const sessionFile = findLatestSessionFile(path.join(this.codexRoot, "sessions"));
-    if (!sessionFile) {
+    let latestSessionFile: string | null = null;
+    let latestMtime = 0;
+    let activeRoot = "";
+    let isGeminiLogs = false;
+
+    for (const root of this.cliRoots) {
+      const isGeminiRoot = root.toLowerCase().includes("gemini");
+
+      if (isGeminiRoot) {
+        // Gemini stores logs in tmp/*/logs.json
+        const tmpDir = path.join(root, "tmp");
+        if (fs.existsSync(tmpDir)) {
+          const projects = fs.readdirSync(tmpDir, { withFileTypes: true });
+          for (const project of projects) {
+            if (!project.isDirectory()) continue;
+            const logFile = path.join(tmpDir, project.name, "logs.json");
+            if (fs.existsSync(logFile)) {
+              const mtime = safeMtime(logFile) ?? 0;
+              if (mtime > latestMtime) {
+                latestMtime = mtime;
+                latestSessionFile = logFile;
+                activeRoot = root;
+                isGeminiLogs = true;
+              }
+            }
+          }
+        }
+      }
+
+      const sessionFile = findLatestSessionFile(path.join(root, "sessions"));
+      if (sessionFile) {
+        const mtime = safeMtime(sessionFile) ?? 0;
+        if (mtime > latestMtime) {
+          latestMtime = mtime;
+          latestSessionFile = sessionFile;
+          activeRoot = root;
+          isGeminiLogs = false;
+        }
+      }
+    }
+
+    if (!latestSessionFile) {
       this.latestSessionCache = {
         value: null,
         loadedAt: now
@@ -157,7 +237,11 @@ export class CodexContextDetector {
       return null;
     }
 
-    const meta = readSessionMeta(sessionFile);
+    if (isGeminiLogs) {
+      return this.readGeminiLogsSession(latestSessionFile, activeRoot, latestMtime, now);
+    }
+
+    const meta = readSessionMeta(latestSessionFile);
     if (!meta?.sessionId) {
       this.latestSessionCache = {
         value: null,
@@ -166,12 +250,14 @@ export class CodexContextDetector {
       return null;
     }
 
-    const sessionUpdatedAt = safeMtime(sessionFile) ?? now;
-    const sessionTitle = this.lookupSessionTitle(meta.sessionId);
-    const recentPrompt = this.lookupRecentPrompt(meta.sessionId);
+    const sessionUpdatedAt = latestMtime || now;
+    const cliTool: "Codex" | "Gemini" = activeRoot.toLowerCase().includes("gemini") ? "Gemini" : "Codex";
+    const sessionTitle = this.lookupSessionTitle(activeRoot, meta.sessionId);
+    const recentPrompt = this.lookupRecentPrompt(activeRoot, meta.sessionId);
 
     const artifact: SessionArtifact = {
       sessionId: meta.sessionId,
+      cliTool,
       sessionTitle,
       workingDirectory: meta.workingDirectory,
       sessionStartedAt: meta.sessionStartedAt,
@@ -187,8 +273,47 @@ export class CodexContextDetector {
     return artifact;
   }
 
-  private lookupSessionTitle(sessionId: string): string | null {
-    const sessionIndexPath = path.join(this.codexRoot, "session_index.jsonl");
+  private readGeminiLogsSession(logFile: string, root: string, mtime: number, now: number): SessionArtifact | null {
+    try {
+      const content = fs.readFileSync(logFile, "utf8");
+      const logs = JSON.parse(content);
+      if (!Array.isArray(logs) || logs.length === 0) return null;
+
+      const lastLog = logs[logs.length - 1];
+      const sessionId = lastLog.sessionId || "gemini-session";
+      const timestamp = parseTimestamp(lastLog.timestamp) || mtime;
+
+      // Try to find project root
+      const projectDir = path.dirname(logFile);
+      const projectRootFile = path.join(projectDir, ".project_root");
+      let workingDirectory: string | null = null;
+      if (fs.existsSync(projectRootFile)) {
+        workingDirectory = fs.readFileSync(projectRootFile, "utf8").trim();
+      }
+
+      const artifact: SessionArtifact = {
+        sessionId,
+        cliTool: "Gemini",
+        sessionTitle: path.basename(projectDir),
+        workingDirectory,
+        sessionStartedAt: timestamp,
+        sessionUpdatedAt: mtime,
+        recentPrompt: normalizeActivityText(lastLog.message)
+      };
+
+      this.latestSessionCache = {
+        value: artifact,
+        loadedAt: now
+      };
+
+      return artifact;
+    } catch {
+      return null;
+    }
+  }
+
+  private lookupSessionTitle(root: string, sessionId: string): string | null {
+    const sessionIndexPath = path.join(root, "session_index.jsonl");
     const rows = readTailJsonl(sessionIndexPath, SESSION_INDEX_TAIL_BYTES, SESSION_INDEX_TAIL_LINES);
 
     for (let index = rows.length - 1; index >= 0; index -= 1) {
@@ -213,8 +338,8 @@ export class CodexContextDetector {
     return null;
   }
 
-  private lookupRecentPrompt(sessionId: string): string | null {
-    const historyPath = path.join(this.codexRoot, "history.jsonl");
+  private lookupRecentPrompt(root: string, sessionId: string): string | null {
+    const historyPath = path.join(root, "history.jsonl");
     const rows = readTailJsonl(historyPath, HISTORY_TAIL_BYTES, HISTORY_TAIL_LINES);
 
     for (let index = rows.length - 1; index >= 0; index -= 1) {

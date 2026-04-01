@@ -4,7 +4,7 @@ import { CodexRuntimeContext } from "./codexContext";
 import { AiLabelingState, ProjectActivity } from "./types";
 import { normalizeProjectName } from "./utils";
 
-const DEFAULT_MODEL = "gpt-5.4-mini";
+const DEFAULT_MODEL = "gpt-5.4-nano";
 const REQUEST_TIMEOUT_MS = 8000;
 const MIN_CLASSIFICATION_INTERVAL_MS = 120_000;
 const MAX_CACHE_ENTRIES = 100;
@@ -15,6 +15,7 @@ interface LabelerConfig {
   enabled: boolean;
   model: string;
   apiKey: string;
+  geminiApiKey?: string;
   envLoaded: boolean;
   envPath: string | null;
 }
@@ -58,6 +59,7 @@ export class OpenAiActivityLabeler {
   private lastAvailabilityLog = "";
   private lastFallbackReason = "";
   private status: AiStatusSnapshot;
+  private tokenDisplayTimer: NodeJS.Timeout | null = null;
 
   constructor(config: LabelerConfig, private readonly onStateChange: () => void) {
     this.config = normalizeConfig(config);
@@ -83,10 +85,14 @@ export class OpenAiActivityLabeler {
       return;
     }
 
+    const model = this.config.model.toLowerCase();
+    const isGemini = model.includes("gemini");
+    const keyToUse = isGemini ? this.config.geminiApiKey : this.config.apiKey;
+
     console.log(
       `[ai] labeling=${this.config.enabled ? "enabled" : "disabled"} model=${this.config.model} api_key=${
-        this.config.apiKey ? "configured" : "missing"
-      }`
+        keyToUse ? "configured" : "missing"
+      } type=${isGemini ? "gemini" : "openai"}`
     );
     this.lastAvailabilityLog = signature;
   }
@@ -119,7 +125,11 @@ export class OpenAiActivityLabeler {
       return null;
     }
 
-    if (!this.config.apiKey) {
+    const model = this.config.model.toLowerCase();
+    const isGemini = model.includes("gemini");
+    const apiKey = isGemini ? this.config.geminiApiKey : this.config.apiKey;
+
+    if (!apiKey) {
       this.setStatus({
         state: "missing-config",
         message: this.config.envLoaded ? "AI Key Missing" : "Env Not Loaded",
@@ -127,7 +137,7 @@ export class OpenAiActivityLabeler {
         tokensUsed: null,
         envPath: this.config.envPath
       });
-      this.logFallback("OPENAI_API_KEY is missing.");
+      this.logFallback(`${isGemini ? "GEMINI" : "OPENAI"}_API_KEY is missing.`);
       return null;
     }
 
@@ -170,7 +180,9 @@ export class OpenAiActivityLabeler {
   }
 
   shouldPreferAiLabels(): boolean {
-    return this.config.enabled && Boolean(this.config.apiKey);
+    const isGemini = this.config.model.toLowerCase().includes("gemini");
+    const apiKey = isGemini ? this.config.geminiApiKey : this.config.apiKey;
+    return this.config.enabled && Boolean(apiKey);
   }
 
   getStatus(): AiStatusSnapshot {
@@ -204,6 +216,21 @@ export class OpenAiActivityLabeler {
         tokensUsed: result.tokensUsed,
         envPath: this.config.envPath
       });
+
+      if (this.tokenDisplayTimer) {
+        clearTimeout(this.tokenDisplayTimer);
+      }
+
+      if (result.tokensUsed) {
+        this.tokenDisplayTimer = setTimeout(() => {
+          this.tokenDisplayTimer = null;
+          this.setStatus({
+            ...this.status,
+            message: "AI Active"
+          });
+        }, 5000);
+      }
+
       console.log(`[ai] Activity label ready: ${label}`);
       if (result.tokensUsed) {
         console.log(`[ai] Tokens used: ${result.tokensUsed}`);
@@ -222,7 +249,9 @@ export class OpenAiActivityLabeler {
   }
 
   private getAvailabilitySignature(): string {
-    return `${this.config.enabled}|${this.config.model}|${Boolean(this.config.apiKey)}`;
+    const isGemini = this.config.model.toLowerCase().includes("gemini");
+    const apiKey = isGemini ? this.config.geminiApiKey : this.config.apiKey;
+    return `${this.config.enabled}|${this.config.model}|${Boolean(apiKey)}`;
   }
 
   private logFallback(reason: string): void {
@@ -285,6 +314,7 @@ function normalizeConfig(config: LabelerConfig): LabelerConfig {
     enabled: Boolean(config.enabled),
     model: config.model?.trim() || DEFAULT_MODEL,
     apiKey: config.apiKey?.trim() ?? "",
+    geminiApiKey: config.geminiApiKey?.trim() ?? "",
     envLoaded: Boolean(config.envLoaded),
     envPath: config.envPath ?? null
   };
@@ -383,6 +413,20 @@ async function requestActivityLabel(
   config: LabelerConfig,
   context: SanitizedClassificationContext
 ): Promise<{ label: string | null; rawLabel: string | null; tokensUsed: number | null }> {
+  const model = config.model.toLowerCase();
+  const isGemini = model.includes("gemini");
+
+  if (isGemini) {
+    return requestGeminiActivityLabel(config, context);
+  }
+
+  return requestOpenAiActivityLabel(config, context);
+}
+
+async function requestOpenAiActivityLabel(
+  config: LabelerConfig,
+  context: SanitizedClassificationContext
+): Promise<{ label: string | null; rawLabel: string | null; tokensUsed: number | null }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -428,6 +472,80 @@ async function requestActivityLabel(
       rawLabel: outputText,
       label: normalizeLabel(outputText, context),
       tokensUsed: typeof payload.usage?.total_tokens === "number" ? payload.usage.total_tokens : null
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function requestGeminiActivityLabel(
+  config: LabelerConfig,
+  context: SanitizedClassificationContext
+): Promise<{ label: string | null; rawLabel: string | null; tokensUsed: number | null }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const apiKey = config.geminiApiKey || config.apiKey;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent?key=${apiKey}`;
+
+    const prompt = `You convert sanitized local coding context into a concise professional Discord Rich Presence activity label for the user.
+Prefer a project-specific label over a generic category whenever the context supports it. Use the fallback label only when the evidence is weak.
+Return only the label in title case, ideally 2 to 6 words, with no sentence, quotes, punctuation, emojis, or explanation.
+Never mention Codex, assistant, agent, AI, Gemini, Google, prompts, chats, or that anyone is working on something.
+Do not repeat the project name, repo name, or branch name in the label.
+
+Sanitized work context:
+${JSON.stringify(context, null, 2)}`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: prompt
+              }
+            ]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.4,
+          topP: 0.8,
+          topK: 40,
+          maxOutputTokens: 100
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gemini API ${response.status}: ${truncateError(errorText)}`);
+    }
+
+    const payload = (await response.json()) as {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{
+            text?: string;
+          }>;
+        };
+      }>;
+      usageMetadata?: {
+        totalTokenCount?: number;
+      };
+    };
+
+    const outputText = payload.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
+    return {
+      rawLabel: outputText,
+      label: normalizeLabel(outputText, context),
+      tokensUsed: payload.usageMetadata?.totalTokenCount ?? null
     };
   } finally {
     clearTimeout(timeout);
